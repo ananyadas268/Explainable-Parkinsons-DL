@@ -1,178 +1,319 @@
+# =====================================================
+# IMPORTS
+# =====================================================
 import streamlit as st
 import tensorflow as tf
-from PIL import Image
 import numpy as np
-import pandas as pd
-import time
+import cv2
+import librosa
+import matplotlib.cm as cm
+from PIL import Image
+import matplotlib.pyplot as plt
 
-# --- Page Configuration ---
+# =====================================================
+# PAGE CONFIG
+# =====================================================
 st.set_page_config(
-    page_title="NeuroScan Pro | Next-Gen Diagnostics",
+    page_title="NeuroScan Pro | Explainable Parkinson’s AI",
     page_icon="🧠",
     layout="wide"
 )
 
-# --- ADVANCED UI STYLING ---
+# =====================================================
+# UI STYLING (READABLE & SAFE)
+# =====================================================
 st.markdown("""
-    <style>
-    .stApp { background-color: #0B0E14; color: #FFFFFF; }
-    [data-testid="stSidebar"] { background-color: #111827 !important; border-right: 1px solid #374151; }
-    
-    /* Hero Title */
-    .hero-text {
-        background: linear-gradient(90deg, #60A5FA, #A78BFA);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 800; font-size: 3.5rem !important;
-        text-align: center; margin-bottom: 0;
-    }
-    
-    /* Feature Cards */
-    .feature-card {
-        background: #1F2937; padding: 25px; border-radius: 15px;
-        border-top: 5px solid #3B82F6; transition: 0.3s;
-    }
-    .feature-card:hover { transform: scale(1.02); background: #2D3748; }
+<style>
+.stApp { background-color: #0B0E14; color: #E5E7EB; }
+[data-testid="stSidebar"] { background-color: #111827; }
+h1,h2,h3,h4,p,label { color: #E5E7EB !important; }
+.stButton>button {
+    background: linear-gradient(45deg, #2563EB, #7C3AED);
+    color: white; font-weight: bold; border-radius: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
 
-    /* Buttons & Progress */
-    .stButton>button {
-        background: linear-gradient(45deg, #2563EB, #7C3AED);
-        color: white !important; border: none; border-radius: 12px;
-        font-weight: bold; font-size: 1.1rem; height: 3.5rem;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- MODEL LOADER ---
+# =====================================================
+# LOAD MODELS
+# =====================================================
 @st.cache_resource
-def load_all_models():
-    try:
-        return {
-            "spiral": tf.keras.models.load_model("VGG16_Spiral_Parkinsons_Model.keras"),
-            "wave": tf.keras.models.load_model("wave_model_81_25_acc.keras"),
-            "voice": tf.keras.models.load_model("parkinsons_inceptionv3_spectrogram_model.keras")
-        }
-    except: return None
-
-models = load_all_models()
-
-# --- SIDEBAR: PATIENT DASHBOARD ---
-with st.sidebar:
-    st.markdown("<h1 style='color: #60A5FA;'>🧬 NeuroScan AI</h1>", unsafe_allow_html=True)
-    st.markdown("---")
-    st.subheader("📋 Patient Metadata")
-    p_name = st.text_input("Full Name", "Aniket Sahgal")
-    p_id = st.text_input("Patient ID", "PD-2024-001")
-    p_age = st.slider("Age", 18, 100, 62)
-    p_gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-    st.markdown("---")
-    menu = st.radio("MAIN CONSOLE", 
-                    ["🌟 Project Showcase", "🌀 Spiral Diagnosis", "🌊 Wave Diagnosis", "🎤 Voice Analysis", "📊 Clinical Report"])
-    st.markdown("---")
-    if st.button("Clear Session"): st.rerun()
-
-# --- PAGE 1: PROJECT SHOWCASE (ATTRACTIVE ABOUT) ---
-if menu == "🌟 Project Showcase":
-    st.markdown("<h1 class='hero-text'>Early PD Detection Suite</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; font-size: 1.2rem;'>Leveraging Multi-Modal Deep Learning & Explainable AI</p>", unsafe_allow_html=True)
-    
-    # Visual Layout
-    st.image("https://img.freepik.com/free-vector/human-brain-structure-concept_1284-18837.jpg", width=800)
-    
-
-    st.markdown("### 🔍 Why Parkinson's Detection Matters")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""
-        <div class='feature-card'>
-        <h4>The Challenge</h4>
-        <p>Parkinson’s is often diagnosed too late because symptoms like minor hand tremors 
-        or voice changes are subtle. Early detection can slow progression by years.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown("""
-        <div class='feature-card'>
-        <h4>Our AI Solution</h4>
-        <p>By combining <b>VGG16</b> for motor patterns and <b>InceptionV3</b> for vocal biomarkers, 
-        we provide a non-invasive, objective screening tool for clinicians.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("### 🛠️ Interactive Diagnosis Flow")
-    st.write("Our 3-Step validation ensures accuracy and trust.")
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Motor Stage", "Spiral Test")
-    c2.metric("Kinetic Stage", "Wave Test")
-    c3.metric("Speech Stage", "Vocal Scan")
-    
-    
-
-# --- PAGES 2, 3, 4: DIAGNOSTIC PIPELINES ---
-elif menu in ["🌀 Spiral Diagnosis", "🌊 Wave Diagnosis", "🎤 Voice Analysis"]:
-    task_map = {
-        "🌀 Spiral Diagnosis": ("spiral", (128, 128), "Spiral Drawing Analysis", "Analyzing circular motor control..."),
-        "🌊 Wave Diagnosis": ("wave", (128, 128), "Wave Handwriting Analysis", "Scanning waveform fluidity..."),
-        "🎤 Voice Analysis": ("voice", (600, 600), "Vocal Frequency Analysis", "Extracting vocal harmonics...")
+def load_models():
+    return {
+        "spiral": tf.keras.models.load_model("VGG16_Spiral_Parkinsons_Model.keras"),
+        "wave": tf.keras.models.load_model("wave_model_81_25_acc.keras"),
+        "voice": tf.keras.models.load_model("parkinsons_inceptionv3_spectrogram_model.keras")
     }
-    key, size, title, loading_msg = task_map[menu]
-    
-    st.title(title)
-    st.markdown(f"**Patient:** {p_name} | **Age:** {p_age} | **ID:** {p_id}")
-    
-    file = st.file_uploader(f"Upload {key.capitalize()} Sample", type=['png', 'jpg', 'jpeg'])
-    
-    if file and models:
-        img = Image.open(file)
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            st.image(img, use_container_width=True, caption="Pre-processed Input")
-        with c2:
-            if st.button(f"🚀 INITIATE NEURAL SCAN"):
-                # Simulation for "Attractive" UI effect
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                for i in range(100):
-                    time.sleep(0.01)
-                    progress_bar.progress(i + 1)
-                    status_text.text(f"{loading_msg} {i+1}%")
-                
-                # Actual Prediction
-                prep = img.convert('RGB').resize(size)
-                arr = np.expand_dims(np.array(prep)/255.0, axis=0)
-                score = models[key].predict(arr)[0][0]
-                
-                status_text.empty()
-                if score > 0.5:
-                    st.markdown(f"<div class='result-box status-positive'><h2>⚠️ WARNING</h2>PD Indicators detected in {key} markers.</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div class='result-box status-negative'><h2>✅ NORMAL</h2>No significant PD markers found.</div>", unsafe_allow_html=True)
-                
-                st.metric("Clinical Confidence", f"{score:.2%}")
-                st.download_button("📩 Download Diagnosis Report", data=f"Patient: {p_name}\nResult: {score}", file_name="report.txt")
 
-# --- PAGE 5: PERFORMANCE REPORT ---
+models = load_models()
+
+MODEL_ACCURACY = {
+    "spiral": 0.8667,
+    "wave": 0.82,
+    "voice": 0.9231
+}
+
+# =====================================================
+# GRAD-CAM HELPERS (ROBUST)
+# =====================================================
+def find_last_conv(model):
+    for layer in reversed(model.layers):
+        if isinstance(layer, tf.keras.layers.Conv2D):
+            return layer.name
+    raise ValueError("No Conv2D layer found.")
+
+def gradcam(img_batch, model):
+    layer_name = find_last_conv(model)
+
+    grad_model = tf.keras.Model(
+        inputs=model.input,
+        outputs=[model.get_layer(layer_name).output, model.output]
+    )
+
+    with tf.GradientTape() as tape:
+        conv_out, preds = grad_model(img_batch)
+
+        if isinstance(preds, (list, tuple)):
+            preds = preds[0]
+
+        if preds.shape[-1] == 1:
+            loss = preds[:, 0]
+        else:
+            loss = preds[:, tf.argmax(preds[0])]
+
+    grads = tape.gradient(loss, conv_out)
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+
+    conv_out = conv_out[0]                    # (h, w, c)
+    heatmap = tf.reduce_sum(conv_out * pooled_grads, axis=-1)
+
+    heatmap = np.maximum(heatmap, 0)
+
+    # 🔥 VERY IMPORTANT: normalize softly
+    heatmap /= (np.max(heatmap) + 1e-8)
+
+    return heatmap
+
+
+
+def overlay(img, heatmap, alpha=0.4):
+    """
+    img: uint8 RGB (H,W,3)
+    heatmap: LOW-RES Grad-CAM (e.g. 7x7)
+    """
+
+    # 🔥 Create a SMOOTH version ONLY for overlay
+    heatmap_overlay = cv2.resize(
+        heatmap,
+        (img.shape[1], img.shape[0]),
+        interpolation=cv2.INTER_CUBIC   # smooth
+    )
+
+    heatmap_overlay = np.clip(heatmap_overlay, 0, 1)
+    heatmap_uint8 = np.uint8(255 * heatmap_overlay)
+
+    heatmap_color = cv2.applyColorMap(
+        heatmap_uint8,
+        cv2.COLORMAP_JET
+    )
+
+    overlay = cv2.addWeighted(
+        img,
+        1 - alpha,
+        heatmap_color,
+        alpha,
+        0
+    )
+
+    return overlay
+
+
+
+
+
+# =====================================================
+# VOICE PREPROCESSING + XAI
+# =====================================================
+TARGET_SR = 8000
+TARGET_LEN = int(1.5 * TARGET_SR)
+IMG_SIZE = (600, 600)
+
+def audio_to_spectrogram(audio):
+    y, sr = librosa.load(audio, sr=None)
+
+    if sr != TARGET_SR:
+        y = librosa.resample(y, orig_sr=sr, target_sr=TARGET_SR)
+
+    # ✅ FIXED HERE
+    y = librosa.util.fix_length(y, size=TARGET_LEN)
+
+    S = np.abs(librosa.stft(y, n_fft=1024, hop_length=128))
+    S = 10 * np.log10(np.maximum(S, 1e-10) / np.max(S))
+
+    S = (S - S.min()) / (S.max() - S.min())
+
+    img = cm.magma(S)[..., :3]
+    img = Image.fromarray((img * 255).astype(np.uint8)).resize(IMG_SIZE)
+
+    return np.array(img) / 255.0
+
+
+def voice_xai(img, model):
+    img_batch = tf.convert_to_tensor(img[None, ...], tf.float32)
+
+    with tf.GradientTape() as tape:
+        tape.watch(img_batch)
+        preds = model(img_batch)
+
+        if preds.shape[-1] == 1:
+            loss = preds[:, 0]
+        else:
+            loss = preds[:, tf.argmax(preds[0])]
+
+    grads = tape.gradient(loss, img_batch)[0]
+
+    heatmap = tf.reduce_mean(tf.abs(grads), axis=-1).numpy()
+
+    # 🔥 Percentile normalization
+    heatmap /= (np.percentile(heatmap, 95) + 1e-8)
+    heatmap = np.clip(heatmap, 0, 1)
+
+
+    # 🔥 Gentle smoothing (keeps detail)
+    heatmap = cv2.GaussianBlur(heatmap, (0, 0), sigmaX=1.2, sigmaY=1.2)
+
+    return heatmap
+
+def heatmap_to_rgb(heatmap):
+    """
+    Convert a normalized heatmap (0–1) to RGB using a colormap.
+    Output is RGB uint8 → PERFECT for Streamlit.
+    """
+    heatmap = np.clip(heatmap, 0, 1)
+    heatmap_uint8 = np.uint8(255 * heatmap)
+
+    # Apply BLUE-dominant colormap
+    heatmap_color = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
+
+    # Convert BGR → RGB
+    heatmap_rgb = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2RGB)
+
+    return heatmap_rgb
+
+
+
+
+
+# =====================================================
+# SIDEBAR
+# =====================================================
+with st.sidebar:
+    st.markdown("## 🧬 NeuroScan AI")
+    menu = st.radio("Select Module", [
+        "🌟 Project Overview",
+        "🌀 Spiral Diagnosis",
+        "🌊 Wave Diagnosis",
+        "🎤 Voice Analysis",
+        "📊 Clinical Report"
+    ])
+
+# =====================================================
+# PAGES
+# =====================================================
+if menu == "🌟 Project Overview":
+    st.markdown("## 🧠 Early Parkinson’s Detection")
+    st.write("Multi-modal deep learning with Explainable AI.")
+
+elif menu in ["🌀 Spiral Diagnosis", "🌊 Wave Diagnosis", "🎤 Voice Analysis"]:
+
+    config = {
+        "🌀 Spiral Diagnosis": ("spiral", (128,128), ["png","jpg","jpeg"]),
+        "🌊 Wave Diagnosis": ("wave", (128,128), ["png","jpg","jpeg"]),
+        "🎤 Voice Analysis": ("voice", None, ["wav"])
+    }
+
+    key, size, ftypes = config[menu]
+    model = models[key]
+
+    file = st.file_uploader("Upload Sample", type=ftypes)
+
+    if file and st.button("🚀 Run Analysis"):
+        if key == "voice":
+            img = audio_to_spectrogram(file)
+            arr = img[None, ...]
+        else:
+            img = Image.open(file).convert("RGB").resize(
+                size,
+                resample=Image.BICUBIC
+            )
+
+            arr = np.array(img) / 255.0
+            arr = arr[None, ...]
+
+        preds = model.predict(arr)
+
+        if preds.shape[-1] == 1:
+            p_pd = float(preds[0][0])
+            confidence = max(p_pd, 1-p_pd)
+            pred_class = 1 if p_pd >= 0.5 else 0
+        else:
+            confidence = float(np.max(preds[0]))
+            pred_class = int(np.argmax(preds[0]))
+
+        if key == "voice":
+            heatmap = voice_xai(img, model)
+        else:
+            heatmap = gradcam(arr, model)
+
+        # ===============================
+        # CREATE TWO HEATMAP VERSIONS
+        # ===============================
+
+        # 1️⃣ BLOCKY heatmap for visualization (squares visible)
+        heatmap_display = cv2.resize(
+            heatmap,
+            (arr[0].shape[1], arr[0].shape[0]),
+            interpolation=cv2.INTER_NEAREST   # 🔥 keeps square blocks
+        )
+
+        # Normalize for plotting
+        heatmap_display = heatmap_display / (heatmap_display.max() + 1e-8)
+
+
+        overlay_img = overlay((arr[0]*255).astype(np.uint8), heatmap)
+
+        c1, c2, c3 = st.columns(3)
+        c1.image(arr[0], caption="Input", use_container_width=True)
+        with c2:
+            fig, ax = plt.subplots(figsize=(3.2, 3.2))  # 🔥 smaller & stable
+
+            ax.imshow(
+                heatmap_display,
+                cmap="jet",
+                interpolation="nearest",  # 🔥 keeps square grid
+                aspect="equal"
+            )
+
+
+            ax.axis("off")
+
+            # 🔥 REMOVE all padding & margins
+            plt.tight_layout(pad=0)
+
+            st.pyplot(fig, clear_figure=True)
+            st.caption("XAI Heatmap")
+
+
+
+        c3.image(overlay_img, caption="Overlay", use_container_width=True)
+
+        diagnosis = "Parkinson’s Detected" if pred_class else "Healthy Control"
+        st.success(f"**Diagnosis:** {diagnosis}")
+        st.info(f"**Confidence:** {confidence*100:.2f}%")
+        st.info(f"**Model Accuracy:** {MODEL_ACCURACY[key]*100:.2f}%")
+
 elif menu == "📊 Clinical Report":
-    st.title("System Analytics & Validation")
-    
-    # THE RECTIFIED METRICS
-    metrics_df = pd.DataFrame({
-        "Metric": ["Precision", "Recall", "F1-Score", "Overall Accuracy"],
-        "Spiral (VGG16)": ["87.67%", "85.33%", "86.49%", "86.67%"],
-        "Wave (CNN)": ["77.90%", "89.33%", "83.22%", "82.00%"],
-        "Voice (InceptionV3)": ["81.0%", "95.0%", "90.0%", "92.31%"]
-    }).set_index("Metric")
-    
-    st.table(metrics_df)
-    
-    st.markdown("---")
-    st.subheader("Validation Visuals (Grad-CAM & Confusion Matrices)")
-    
-    
-    
-    tabs = st.tabs(["🌀 Spiral", "🌊 Wave", "🎤 Voice"])
-    with tabs[0]: st.image("CONFUSION MATRIX FOR SPIRAL .jpg", use_container_width=True)
-    with tabs[1]: st.image("CONFUSION MATRIX FOR WAVE.jpg", use_container_width=True)
-    with tabs[2]: st.image("Confusion matrix for voice PArkinsons.png", use_container_width=True)
+    st.markdown("## 📊 Model Performance")
+    st.write("All models validated on held-out test sets with Explainable AI.")
+
+
